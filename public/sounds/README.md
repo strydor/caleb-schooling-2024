@@ -4,4 +4,4 @@ Sound effects for the Synonym Constellation Game:
 - complete.mp3: Sound played when the game is completed successfully
 - lose.mp3: Sound played when the timer runs out
 
-Please add appropriate sound files in this directory.
+Please add appropriate sound files in this directory. 
