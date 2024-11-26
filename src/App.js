@@ -3,7 +3,7 @@ import { Amplify } from 'aws-amplify';
 import { generateClient } from '@aws-amplify/api';
 import { getUrl } from '@aws-amplify/storage';
 import { listHighScores } from './graphql/queries';
-import { createHighScore } from './graphql/mutations';
+import { createHighScore, deleteHighScore } from './graphql/mutations';
 import { listSynonymPairs } from './graphql/queries';
 import awsconfig from './aws-exports';
 import './App.css';
@@ -26,6 +26,8 @@ function SynonymConstellationGame() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [synonymPairs, setSynonymPairs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [gameStarted, setGameStarted] = useState(false);
 
   useEffect(() => {
     fetchSynonymPairs();
@@ -44,9 +46,27 @@ function SynonymConstellationGame() {
       
       // Initialize game with fetched pairs
       if (pairs.length >= 5) {
-        const selectedPairs = [...pairs]
-          .sort(() => Math.random() - 0.5)
-          .slice(0, 5);
+        // Create a map to track words that are already used
+        const usedWords = new Set();
+        const selectedPairs = [];
+        
+        // Shuffle pairs first
+        const shuffledPairs = [...pairs].sort(() => Math.random() - 0.5);
+        
+        // Select pairs ensuring no word is used more than once
+        for (const pair of shuffledPairs) {
+          if (selectedPairs.length >= 5) break;
+          
+          // Skip if either word is already used
+          if (usedWords.has(pair.word1) || usedWords.has(pair.word2)) {
+            continue;
+          }
+          
+          // Add pair and mark both words as used
+          selectedPairs.push(pair);
+          usedWords.add(pair.word1);
+          usedWords.add(pair.word2);
+        }
         
         const words = selectedPairs.flatMap(pair => [pair.word1, pair.word2]);
         setShuffledWords(words.sort(() => Math.random() - 0.5));
@@ -61,24 +81,30 @@ function SynonymConstellationGame() {
     }
   };
 
+  // Function to fetch high scores
+  const fetchHighScores = async () => {
+    try {
+      const result = await client.graphql({
+        query: listHighScores,
+        variables: {
+          limit: 10,
+          sort: { field: 'score', direction: 'DESC' }
+        }
+      });
+      
+      // Sort scores by highest time remaining (fastest completion)
+      const sortedScores = result.data.listHighScores.items
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 10);
+      
+      setHighScores(sortedScores);
+    } catch (error) {
+      console.error('Error fetching high scores:', error);
+    }
+  };
+
   useEffect(() => {
     // Load high scores from AppSync when component mounts
-    const fetchHighScores = async () => {
-      try {
-        const response = await client.graphql({
-          query: listHighScores,
-          variables: {
-            limit: 5,
-            sortDirection: 'DESC'
-          }
-        });
-        const scores = response.data.listHighScores.items;
-        setHighScores(scores);
-      } catch (error) {
-        console.error('Error fetching high scores:', error);
-      }
-    };
-    
     fetchHighScores();
   }, []);
 
@@ -110,102 +136,55 @@ function SynonymConstellationGame() {
     loadAudioFiles();
   }, []);
 
-  const startNewGame = () => {
-    if (synonymPairs.length < 5) {
-      console.error('Not enough synonym pairs available');
-      return;
-    }
-    
-    // Randomly select 5 pairs
-    const selectedPairs = [...synonymPairs]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 5);
-    
-    // Create words array from pairs
-    const words = selectedPairs.flatMap(pair => [pair.word1, pair.word2]);
-    
-    // Shuffle words
-    setShuffledWords(words.sort(() => Math.random() - 0.5));
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      // Check for Ctrl+Shift+A
+      if (event.ctrlKey && event.shiftKey && event.key === 'A') {
+        setIsAdmin(prevState => !prevState);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const resetGame = () => {
     setSelectedWords([]);
     setMatches([]);
     setTimer(60);
     setGameOver(false);
     setStars(0);
     setIncorrectWord(null);
-    playSound('start');
-  };
-
-  const checkHighScore = (timeLeft) => {
-    // Only check for high score if the player won the game
-    if (timeLeft === 0 || stars < 5) return false;
-    const score = timeLeft;
-    const lowestScore = highScores.length < 5 ? -1 : Math.min(...highScores.map(s => s.score));
-    return highScores.length < 5 || score > lowestScore;
-  };
-
-  const addHighScore = async (name, timeLeft) => {
-    try {
-      const newScore = {
-        input: {
-          name,
-          score: timeLeft,
-          date: new Date().toISOString()
-        }
-      };
-
-      const response = await client.graphql({
-        query: createHighScore,
-        variables: newScore
-      });
-
-      const createdScore = response.data.createHighScore;
-      const newScores = [...highScores, createdScore]
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 5);
+    setShowNameInput(false);
+    setPlayerName('');
+    setGameStarted(false);
+    
+    // Re-shuffle words
+    if (synonymPairs.length >= 5) {
+      // Create a map to track words that are already used
+      const usedWords = new Set();
+      const selectedPairs = [];
       
-      setHighScores(newScores);
-      setShowNameInput(false);
-      setPlayerName('');
-    } catch (error) {
-      console.error('Error adding high score:', error);
-    }
-  };
-
-  useEffect(() => {
-    if (!gameOver) {
-      if (stars === 5 || shuffledWords.length === 0) {
-        setGameOver(true);
-        playSound('win');
-        // Only check for high score if player won with time remaining
-        if (timer > 0 && checkHighScore(timer)) {
-          setShowNameInput(true);
+      // Shuffle pairs first
+      const shuffledPairs = [...synonymPairs].sort(() => Math.random() - 0.5);
+      
+      // Select pairs ensuring no word is used more than once
+      for (const pair of shuffledPairs) {
+        if (selectedPairs.length >= 5) break;
+        
+        // Skip if either word is already used
+        if (usedWords.has(pair.word1) || usedWords.has(pair.word2)) {
+          continue;
         }
-      } else if (timer > 0) {
-        const timerId = setInterval(() => {
-          setTimer(prevTimer => {
-            if (prevTimer <= 1) {
-              clearInterval(timerId);
-              setGameOver(true);
-              playSound('lose');
-              return 0;
-            }
-            return prevTimer - 1;
-          });
-        }, 1000);
-        return () => clearInterval(timerId);
-      } else {
-        setGameOver(true);
-        playSound('lose');
+        
+        // Add pair and mark both words as used
+        selectedPairs.push(pair);
+        usedWords.add(pair.word1);
+        usedWords.add(pair.word2);
       }
-    }
-  }, [timer, shuffledWords, stars, gameOver, soundEnabled, audioUrls]);
-
-  const playSound = (soundType) => {
-    if (soundEnabled && audioUrls[soundType]) {
-      const audio = new Audio(audioUrls[soundType]);
-      audio.play().catch(err => {
-        console.error(`Error playing ${soundType} sound:`, err);
-      });
+      
+      const words = selectedPairs.flatMap(pair => [pair.word1, pair.word2]);
+      setShuffledWords(words.sort(() => Math.random() - 0.5));
     }
   };
 
@@ -232,6 +211,95 @@ function SynonymConstellationGame() {
         playSound('incorrect');
       }
       setSelectedWords([]);
+    }
+  };
+
+  const startGame = () => {
+    resetGame();
+    setGameStarted(true);
+    playSound('start');
+  };
+
+  useEffect(() => {
+    if (!gameOver && gameStarted && timer > 0) {
+      const timerId = setInterval(() => {
+        setTimer(prevTimer => {
+          if (prevTimer <= 1) {
+            clearInterval(timerId);
+            setGameOver(true);
+            playSound('lose');
+            return 0;
+          }
+          return prevTimer - 1;
+        });
+      }, 1000);
+      return () => clearInterval(timerId);
+    }
+  }, [gameStarted, gameOver]);
+
+  useEffect(() => {
+    if (!gameOver && stars === 5) {
+      setGameOver(true);
+      playSound('win');
+      if (timer > 0 && checkHighScore(timer)) {
+        setShowNameInput(true);
+      }
+    }
+  }, [stars, gameOver, timer]);
+
+  const checkHighScore = (finalTime) => {
+    if (highScores.length < 10) return true;
+    return finalTime > highScores[highScores.length - 1]?.score || false;
+  };
+
+  const submitHighScore = async (playerName) => {
+    try {
+      const date = new Date().toISOString();
+      const result = await client.graphql({
+        query: createHighScore,
+        variables: {
+          input: {
+            name: playerName,
+            score: timer,
+            date: date
+          }
+        }
+      });
+      
+      // Update high scores immediately
+      await fetchHighScores();
+      setShowNameInput(false);
+    } catch (error) {
+      console.error('Error submitting high score:', error);
+    }
+  };
+
+  const clearHighScores = async () => {
+    try {
+      // Delete each high score
+      for (const score of highScores) {
+        await client.graphql({
+          query: deleteHighScore,
+          variables: {
+            input: {
+              id: score.id
+            }
+          }
+        });
+      }
+      // Refresh high scores
+      await fetchHighScores();
+    } catch (error) {
+      console.error('Error clearing high scores:', error);
+    }
+  };
+
+  const playSound = (soundType) => {
+    if (soundEnabled && audioUrls[soundType]) {
+      const audio = new Audio(audioUrls[soundType]);
+      audio.play().catch(err => {
+        console.error(`Error playing ${soundType} sound:`, err);
+      });
     }
   };
 
@@ -269,6 +337,22 @@ function SynonymConstellationGame() {
               >
                 {soundEnabled ? '🔊' : '🔈'}
               </button>
+              <button
+                className="reset-button"
+                onClick={resetGame}
+                title="Reset Game"
+              >
+                🔄 Reset
+              </button>
+              {isAdmin && (
+                <button
+                  className="clear-scores-button"
+                  onClick={clearHighScores}
+                  title="Clear High Scores"
+                >
+                  🗑️ Clear Scores
+                </button>
+              )}
             </div>
             <h1 className="game-title">
               <span className="title-star left">⭐</span>
@@ -286,26 +370,41 @@ function SynonymConstellationGame() {
             </div>
             
             <div className="game-board">
-              {shuffledWords.map((word, index) => (
-                <button
-                  key={index}
-                  className={`word-button ${selectedWords.includes(word) ? 'selected' : ''} ${
-                    incorrectWord === word ? 'incorrect' : ''
-                  } ${matches.includes(word) ? 'matched' : ''}`}
-                  onClick={() => handleWordClick(word)}
-                  disabled={matches.includes(word) || gameOver}
-                  onMouseEnter={() => speakWord(word)}
-                  onMouseLeave={stopSpeaking}
-                >
-                  {word}
-                </button>
-              ))}
+              {!gameStarted ? (
+                <div className="start-screen">
+                  <h2>Welcome to Synonym Constellation!</h2>
+                  <p>Match 5 pairs of synonyms before time runs out.</p>
+                  <button 
+                    className="start-button"
+                    onClick={startGame}
+                  >
+                    Play Game
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {shuffledWords.map((word, index) => (
+                    <button
+                      key={index}
+                      className={`word-button ${selectedWords.includes(word) ? 'selected' : ''} ${
+                        incorrectWord === word ? 'incorrect' : ''
+                      } ${matches.includes(word) ? 'matched' : ''}`}
+                      onClick={() => handleWordClick(word)}
+                      disabled={matches.includes(word) || gameOver}
+                      onMouseEnter={() => speakWord(word)}
+                      onMouseLeave={stopSpeaking}
+                    >
+                      {word}
+                    </button>
+                  ))}
+                </>
+              )}
             </div>
 
             {gameOver && (
               <div className="game-over">
                 <h2>{stars === 5 ? '🎉 You Won! 🎉' : '😢 Game Over'}</h2>
-                <button onClick={startNewGame}>Play Again</button>
+                <button onClick={resetGame}>Play Again</button>
               </div>
             )}
 
@@ -354,7 +453,7 @@ function SynonymConstellationGame() {
                   onChange={(e) => setPlayerName(e.target.value)}
                   maxLength={15}
                 />
-                <button onClick={() => addHighScore(playerName, timer)}>Save Score</button>
+                <button onClick={() => submitHighScore(playerName)}>Save Score</button>
               </div>
             </div>
           )}

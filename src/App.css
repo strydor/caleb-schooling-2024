@@ -374,6 +374,39 @@ body {
   transform: translateY(-2px);
 }
 
+.start-screen {
+  text-align: center;
+  padding: 2rem;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 15px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.start-screen h2 {
+  color: #2c3e50;
+  margin-bottom: 1rem;
+}
+
+.start-screen p {
+  color: #34495e;
+  margin-bottom: 2rem;
+}
+
+.start-button {
+  background-color: #3498db;
+  color: white;
+  border: none;
+  padding: 1rem 2rem;
+  font-size: 1.2rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.start-button:hover {
+  background-color: #2980b9;
+}
+
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
   25% { transform: translateX(-10px); }
